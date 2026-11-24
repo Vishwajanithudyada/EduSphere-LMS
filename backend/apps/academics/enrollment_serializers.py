@@ -237,7 +237,6 @@ class CourseInvitationSerializer(serializers.ModelSerializer):
             "invited_user",
             "invited_user_username",
             "invited_email",
-            "token",
             "status",
             "status_display",
             "invited_by",

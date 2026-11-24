@@ -21,9 +21,6 @@ from apps.academics.tests import AcademicsTestDataMixin
 
 
 class CourseInvitationSecurityTests(AcademicsTestDataMixin, TestCase):
-    """
-    Security tests for course invitation ownership and email verification.
-    """
 
     def setUp(self):
         self.client = APIClient()
@@ -97,7 +94,6 @@ class CourseInvitationSecurityTests(AcademicsTestDataMixin, TestCase):
             expires_at=timezone.now() + timedelta(days=7),
         )
 
-        # Give the other account the same email address.
         self.other_student.email = self.student.email
         self.other_student.save(update_fields=["email"])
 
@@ -173,4 +169,76 @@ class CourseInvitationSecurityTests(AcademicsTestDataMixin, TestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_registered_invitation_cannot_be_accepted_by_another_student(self):
+        invitation = CourseInvitation.objects.create(
+            course=self.course,
+            invited_user=self.student,
+            invited_email=self.student.email,
+            invited_by=self.teacher,
+            expires_at=timezone.now() + timedelta(days=7),
+        )
+
+        self.authenticate(self.other_student)
+
+        response = self.client.post(
+            f"{self.url}{invitation.id}/accept/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+        self.assertFalse(
+            CourseEnrollment.objects.filter(
+                course=self.course,
+                student=self.other_student,
+            ).exists()
+        )
+
+        invitation.refresh_from_db()
+
+        self.assertEqual(
+            invitation.status,
+            CourseInvitation.Status.PENDING,
+        )
+
+    def test_expired_invitation_cannot_be_accepted(self):
+        invitation = CourseInvitation.objects.create(
+            course=self.course,
+            invited_user=self.student,
+            invited_email=self.student.email,
+            invited_by=self.teacher,
+            expires_at=timezone.now() - timedelta(days=1),
+        )
+
+        self.authenticate(self.student)
+
+        response = self.client.post(
+            f"{self.url}{invitation.id}/accept/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertFalse(
+            CourseEnrollment.objects.filter(
+                course=self.course,
+                student=self.student,
+            ).exists()
+        )
+
+        invitation.refresh_from_db()
+
+        self.assertEqual(
+            invitation.status,
+            CourseInvitation.Status.EXPIRED,
         )

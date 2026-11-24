@@ -1198,6 +1198,63 @@ class EnrollmentRequestAPITests(AcademicsTestDataMixin, TestCase):
             status.HTTP_400_BAD_REQUEST,
         )
 
+    def test_teacher_can_only_list_requests_for_own_courses(self):
+        another_course = self.create_published_approval_course(
+            self.other_teacher,
+            "ENR-ICT-003",
+        )
+
+        own_request = self.create_request()
+        other_request = self.create_request(
+            course=another_course,
+            student=self.other_student,
+        )
+
+        self.authenticate(self.teacher)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        returned_ids = [item["id"] for item in response.data]
+
+        self.assertIn(own_request.id, returned_ids)
+        self.assertNotIn(other_request.id, returned_ids)
+
+    def test_teacher_cannot_view_another_teachers_request(self):
+        another_course = self.create_published_approval_course(
+            self.other_teacher,
+            "ENR-ICT-004",
+        )
+
+        other_request = self.create_request(
+            course=another_course,
+            student=self.other_student,
+        )
+
+        self.authenticate(self.teacher)
+
+        response = self.client.get(
+            f"{self.url}{other_request.id}/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_unauthenticated_user_cannot_list_enrollment_requests(self):
+        response = self.client.get(self.url)
+
+        self.assertIn(
+            response.status_code,
+            [
+                status.HTTP_401_UNAUTHORIZED,
+                status.HTTP_403_FORBIDDEN,
+            ],
+        )
+
+
 class CourseInvitationAPITests(AcademicsTestDataMixin, TestCase):
     """
     API tests for course invitations.
@@ -1565,6 +1622,53 @@ class CourseInvitationAPITests(AcademicsTestDataMixin, TestCase):
         self.assertEqual(
             invitation.status,
             CourseInvitation.Status.REVOKED,
+        )
+
+    def test_teacher_cannot_view_another_teachers_invitation(self):
+        another_course = self.create_published_invitation_course(
+            self.other_teacher,
+            "INV-ICT-003",
+        )
+
+        invitation = self.create_invitation(
+            course=another_course,
+            invited_by=self.other_teacher,
+        )
+
+        self.authenticate(self.teacher)
+
+        response = self.client.get(
+            f"{self.url}{invitation.id}/",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_teacher_cannot_revoke_invitation_sent_by_another_inviter(self):
+        invitation = self.create_invitation(
+            invited_by=self.other_teacher,
+        )
+
+        self.authenticate(self.teacher)
+
+        response = self.client.post(
+            f"{self.url}{invitation.id}/revoke/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        invitation.refresh_from_db()
+
+        self.assertEqual(
+            invitation.status,
+            CourseInvitation.Status.PENDING,
         )
 
     def test_duplicate_pending_invitation_is_rejected(self):

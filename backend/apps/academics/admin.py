@@ -1,5 +1,6 @@
 
 from django.contrib import admin
+
 from .models import (
     AcademicYear,
     Stream,
@@ -50,6 +51,7 @@ class CourseApprovalLogInline(admin.TabularInline):
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
+
     list_display = (
         "title",
         "code",
@@ -73,10 +75,14 @@ class CourseAdmin(admin.ModelAdmin):
 
     search_fields = ("title", "code")
 
+    # Workflow-managed fields cannot be changed directly
+    # through Django Admin.
     readonly_fields = (
+        "approval_status",
         "created_by",
         "reviewed_by",
         "reviewed_at",
+        "rejection_reason",
         "created_at",
         "updated_at",
     )
@@ -92,6 +98,7 @@ class CourseAdmin(admin.ModelAdmin):
 
 @admin.register(CourseApprovalLog)
 class CourseApprovalLogAdmin(admin.ModelAdmin):
+
     list_display = (
         "course",
         "action",
@@ -100,7 +107,12 @@ class CourseApprovalLogAdmin(admin.ModelAdmin):
     )
 
     list_filter = ("action", "created_at")
-    search_fields = ("course__title", "course__code", "remarks")
+
+    search_fields = (
+        "course__title",
+        "course__code",
+        "remarks",
+    )
 
     readonly_fields = (
         "course",
