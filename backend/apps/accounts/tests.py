@@ -1,7 +1,11 @@
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.test import TestCase, RequestFactory
+from django.urls import reverse
+from django import forms
+
 
 from .admin import CustomUserAdmin
 
@@ -40,6 +44,13 @@ class CustomUserAdminSecurityTests(TestCase):
             password="TestPassword123!",
             role=User.Role.STUDENT,
         )
+
+        change_permission = Permission.objects.get(
+            content_type__app_label=User._meta.app_label,
+            codename=f"change_{User._meta.model_name}",
+        )
+
+        self.normal_staff.user_permissions.add(change_permission)
 
     def get_request(self, user):
         request = self.factory.get("/admin/accounts/user/")
@@ -155,3 +166,80 @@ class CustomUserAdminSecurityTests(TestCase):
         self.assertFalse(new_user.is_staff)
         self.assertFalse(new_user.is_superuser)
         self.assertFalse(new_user.is_email_verified)
+
+    def test_http_staff_can_access_student_change_page(self):
+        self.client.force_login(self.normal_staff)
+
+        url = reverse(
+            "admin:accounts_user_change",
+            args=[self.student.pk],
+        )
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_http_forged_post_cannot_escalate_student(self):
+        self.client.force_login(self.normal_staff)
+
+        url = reverse(
+            "admin:accounts_user_change",
+            args=[self.student.pk],
+        )
+
+        get_response = self.client.get(url)
+
+        self.assertEqual(get_response.status_code, 200)
+
+        form = get_response.context["adminform"].form
+        post_data = {}
+
+        for name, field in form.fields.items():
+            value = form.initial.get(name)
+
+            if value is None and hasattr(self.student, name):
+                value = getattr(self.student, name)
+
+            if isinstance(field.widget, forms.SplitDateTimeWidget):
+                date_value, time_value = field.widget.decompress(value)
+
+                post_data[f"{name}_0"] = (
+                    date_value.strftime("%Y-%m-%d")
+                    if date_value else ""
+                )
+
+                post_data[f"{name}_1"] = (
+                    time_value.strftime("%H:%M:%S")
+                    if time_value else ""
+                )
+
+            elif isinstance(field, forms.BooleanField):
+                post_data[name] = "on" if value else ""
+
+            elif value is not None:
+                post_data[name] = field.prepare_value(value)
+
+            else:
+                post_data[name] = ""
+
+        post_data.update({
+            "role": User.Role.SYSTEM_ADMIN,
+            "is_staff": "on",
+            "is_superuser": "on",
+            "is_email_verified": "on",
+            "_save": "Save",
+        })
+
+        response = self.client.post(url, post_data)
+
+        self.assertEqual(response.status_code, 302)
+
+        self.student.refresh_from_db()
+
+        self.assertEqual(
+            self.student.role,
+            User.Role.STUDENT,
+        )
+        self.assertFalse(self.student.is_staff)
+        self.assertFalse(self.student.is_superuser)
+        self.assertFalse(self.student.is_email_verified)

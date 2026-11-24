@@ -39,3 +39,4 @@ build/
 # Operating system
 .DS_Store
 Thumbs.db
+installed_packages.txt

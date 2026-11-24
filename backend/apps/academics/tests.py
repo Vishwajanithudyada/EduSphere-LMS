@@ -661,6 +661,7 @@ class CourseAPITests(AcademicsTestDataMixin, TestCase):
             status.HTTP_200_OK,
         )
 
+
 class CoursePublishingValidationTests(AcademicsTestDataMixin, TestCase):
     """
     Tests for course publishing validation.
@@ -708,7 +709,6 @@ class CoursePublishingValidationTests(AcademicsTestDataMixin, TestCase):
             code="PUB-ICT-001",
         )
 
-        # Prepare the course for publishing.
         self.course.approval_status = (
             Course.ApprovalStatus.APPROVED
         )
