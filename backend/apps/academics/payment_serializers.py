@@ -11,6 +11,20 @@ from .models import (
 )
 
 
+class PaymentAttemptCreateSerializer(serializers.Serializer):
+
+    payment = serializers.PrimaryKeyRelatedField(
+        queryset=EnrollmentPayment.objects.all(),
+    )
+
+    provider = serializers.CharField(
+        max_length=100,
+        trim_whitespace=True,
+    )
+
+    idempotency_key = serializers.UUIDField()
+
+
 class PaymentAttemptReadSerializer(serializers.ModelSerializer):
 
     class Meta:

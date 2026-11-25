@@ -20,6 +20,7 @@ from .models import (
 from .payment_serializers import (
     PaymentObligationCreateSerializer,
     PaymentObligationReadSerializer,
+    PaymentAttemptCreateSerializer,
     PaymentAttemptReadSerializer,
     PaymentRefundCreateSerializer,
     PaymentRefundReadSerializer,
@@ -27,6 +28,7 @@ from .payment_serializers import (
 
 from .services.payment_services import (
     create_payment_obligation,
+    create_payment_attempt,
     request_payment_refund,
 )
 
@@ -159,6 +161,7 @@ class PaymentObligationViewSet(
 class PaymentAttemptViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
     viewsets.GenericViewSet,
 ):
 
@@ -166,6 +169,7 @@ class PaymentAttemptViewSet(
 
     http_method_names = [
         "get",
+        "post",
         "head",
         "options",
     ]
@@ -190,7 +194,55 @@ class PaymentAttemptViewSet(
 
         return queryset.none()
 
-    serializer_class = PaymentAttemptReadSerializer
+    def get_serializer_class(self):
+
+        if self.action == "create":
+            return PaymentAttemptCreateSerializer
+
+        return PaymentAttemptReadSerializer
+
+    def create(self, request, *args, **kwargs):
+
+        if request.user.role != User.Role.STUDENT:
+            raise PermissionDenied(
+                "Only students can create payment attempts."
+            )
+
+        serializer = self.get_serializer(
+            data=request.data,
+        )
+
+        serializer.is_valid(
+            raise_exception=True,
+        )
+
+        data = serializer.validated_data
+
+        try:
+
+            attempt = create_payment_attempt(
+                payment_id=data["payment"].pk,
+                user=request.user,
+                provider=data["provider"],
+                idempotency_key=data["idempotency_key"],
+            )
+
+        except (
+            DjangoPermissionDenied,
+            DjangoValidationError,
+        ) as exc:
+
+            handle_service_exception(exc)
+
+        response_serializer = PaymentAttemptReadSerializer(
+            attempt,
+            context=self.get_serializer_context(),
+        )
+
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 # ============================================================

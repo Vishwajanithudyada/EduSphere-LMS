@@ -291,9 +291,9 @@ class PaymentAPISecurityTests(TestCase):
 
         self.assertEqual(len(items), 0)
 
-    # PAYMENT ATTEMPT ACCESS
+    # PAYMENT ATTEMPT ACCESS AND CREATION
 
-    def test_student_cannot_create_payment_attempt_through_api(self):
+    def test_student_can_create_payment_attempt_for_own_pending_payment(self):
 
         payment = self.create_payment(
             payment_status=EnrollmentPayment.Status.PENDING,
@@ -313,7 +313,58 @@ class PaymentAPISecurityTests(TestCase):
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_405_METHOD_NOT_ALLOWED,
+            status.HTTP_201_CREATED,
+            response.data,
+        )
+
+        attempt = PaymentAttempt.objects.get(
+            payment=payment,
+        )
+
+        self.assertEqual(
+            attempt.status,
+            PaymentAttempt.Status.INITIATED,
+        )
+
+        self.assertEqual(
+            attempt.amount,
+            payment.amount,
+        )
+
+        self.assertEqual(
+            attempt.currency,
+            payment.currency,
+        )
+
+        payment.refresh_from_db()
+
+        self.assertEqual(
+            payment.status,
+            EnrollmentPayment.Status.PENDING,
+        )
+
+    def test_student_cannot_create_attempt_for_another_students_payment(self):
+
+        payment = self.create_payment(
+            enrollment=self.other_enrollment,
+            payment_status=EnrollmentPayment.Status.PENDING,
+        )
+
+        self.authenticate(self.student)
+
+        response = self.client.post(
+            self.attempts_url,
+            {
+                "payment": payment.id,
+                "provider": "TEST_PROVIDER",
+                "idempotency_key": str(uuid4()),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
         )
 
         self.assertEqual(
@@ -321,6 +372,205 @@ class PaymentAPISecurityTests(TestCase):
                 payment=payment,
             ).count(),
             0,
+        )
+
+    def test_teacher_cannot_create_payment_attempt(self):
+
+        payment = self.create_payment(
+            payment_status=EnrollmentPayment.Status.PENDING,
+        )
+
+        self.authenticate(self.teacher)
+
+        response = self.client.post(
+            self.attempts_url,
+            {
+                "payment": payment.id,
+                "provider": "TEST_PROVIDER",
+                "idempotency_key": str(uuid4()),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.assertEqual(
+            PaymentAttempt.objects.filter(
+                payment=payment,
+            ).count(),
+            0,
+        )
+
+    def test_admin_cannot_create_payment_attempt(self):
+
+        payment = self.create_payment(
+            payment_status=EnrollmentPayment.Status.PENDING,
+        )
+
+        self.authenticate(self.admin)
+
+        response = self.client.post(
+            self.attempts_url,
+            {
+                "payment": payment.id,
+                "provider": "TEST_PROVIDER",
+                "idempotency_key": str(uuid4()),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.assertEqual(
+            PaymentAttempt.objects.filter(
+                payment=payment,
+            ).count(),
+            0,
+        )
+
+    def test_student_cannot_create_attempt_for_paid_payment(self):
+
+        payment = self.create_payment(
+            payment_status=EnrollmentPayment.Status.PAID,
+        )
+
+        self.authenticate(self.student)
+
+        response = self.client.post(
+            self.attempts_url,
+            {
+                "payment": payment.id,
+                "provider": "TEST_PROVIDER",
+                "idempotency_key": str(uuid4()),
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertEqual(
+            PaymentAttempt.objects.filter(
+                payment=payment,
+            ).count(),
+            0,
+        )
+
+    def test_same_idempotency_key_does_not_create_duplicate_attempts(self):
+
+        payment = self.create_payment(
+            payment_status=EnrollmentPayment.Status.PENDING,
+        )
+
+        idempotency_key = str(uuid4())
+
+        payload = {
+            "payment": payment.id,
+            "provider": "TEST_PROVIDER",
+            "idempotency_key": idempotency_key,
+        }
+
+        self.authenticate(self.student)
+
+        first_response = self.client.post(
+            self.attempts_url,
+            payload,
+            format="json",
+        )
+
+        second_response = self.client.post(
+            self.attempts_url,
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_201_CREATED,
+            first_response.data,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_201_CREATED,
+            second_response.data,
+        )
+
+        self.assertEqual(
+            first_response.data["id"],
+            second_response.data["id"],
+        )
+
+        self.assertEqual(
+            PaymentAttempt.objects.filter(
+                payment=payment,
+            ).count(),
+            1,
+        )
+
+    def test_client_cannot_control_payment_attempt_status_or_amount(self):
+
+        payment = self.create_payment(
+            payment_status=EnrollmentPayment.Status.PENDING,
+        )
+
+        self.authenticate(self.student)
+
+        response = self.client.post(
+            self.attempts_url,
+            {
+                "payment": payment.id,
+                "provider": "TEST_PROVIDER",
+                "idempotency_key": str(uuid4()),
+                "amount": "1.00",
+                "currency": "USD",
+                "status": "SUCCEEDED",
+                "transaction_id": "FAKE-TRANSACTION",
+                "failure_code": "FAKE",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+            response.data,
+        )
+
+        attempt = PaymentAttempt.objects.get(
+            payment=payment,
+        )
+
+        self.assertEqual(
+            attempt.status,
+            PaymentAttempt.Status.INITIATED,
+        )
+
+        self.assertEqual(
+            attempt.amount,
+            payment.amount,
+        )
+
+        self.assertEqual(
+            attempt.currency,
+            payment.currency,
+        )
+
+        self.assertIsNone(attempt.transaction_id)
+
+        payment.refresh_from_db()
+
+        self.assertEqual(
+            payment.status,
+            EnrollmentPayment.Status.PENDING,
         )
 
     def test_student_cannot_view_another_students_payment_attempt(self):
